@@ -19,17 +19,12 @@ package gpu
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
-	"math/rand"
 	"strings"
 
-	"github.com/google/uuid"
 	resourceapi "k8s.io/api/resource/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/dynamic-resource-allocation/resourceslice"
 	"k8s.io/klog/v2"
-	"k8s.io/utils/ptr"
 	cdiapi "tags.cncf.io/container-device-interface/pkg/cdi"
 	cdispec "tags.cncf.io/container-device-interface/specs-go"
 
@@ -62,118 +57,11 @@ func NewProfile(nodeName string, numGPUs int, partitionsPerGPU int, enableDevice
 }
 
 func (p Profile) EnumerateDevices() (resourceslice.DriverResources, error) {
-	seed := p.nodeName
-	uuids := generateUUIDs(seed, p.numGPUs)
-
-	memoryPerGPU := resource.MustParse("80Gi")
-	computePerGPU := resource.MustParse("100")
-
-	var devices []resourceapi.Device
-	var sharedCounters []resourceapi.CounterSet
-
-	var partitionMemory, partitionCompute resource.Quantity
-	if p.partitionsPerGPU > 0 {
-		partitionMemory = *resource.NewQuantity(memoryPerGPU.Value()/int64(p.partitionsPerGPU), resource.BinarySI)
-		partitionCompute = *resource.NewQuantity(computePerGPU.Value()/int64(p.partitionsPerGPU), resource.DecimalSI)
-	}
-
-	for i, uuid := range uuids {
-		attrs := map[resourceapi.QualifiedName]resourceapi.DeviceAttribute{
-			"index": {
-				IntValue: ptr.To(int64(i)),
-			},
-			"uuid": {
-				StringValue: ptr.To(uuid),
-			},
-			"model": {
-				StringValue: ptr.To("LATEST-GPU-MODEL"),
-			},
-			"driverVersion": {
-				VersionValue: ptr.To("1.0.0"),
-			},
-		}
-
-		if p.partitionsPerGPU > 0 {
-			counterSetName := fmt.Sprintf("gpu-%d-counters", i)
-			sharedCounters = append(sharedCounters, resourceapi.CounterSet{
-				Name: counterSetName,
-				Counters: map[string]resourceapi.Counter{
-					"memory": {
-						Value: memoryPerGPU,
-					},
-					"compute": {
-						Value: computePerGPU,
-					},
-				},
-			})
-
-			for j := 0; j < p.partitionsPerGPU; j++ {
-				partitionAttrs := maps.Clone(attrs)
-				partitionAttrs["partition"] = resourceapi.DeviceAttribute{IntValue: ptr.To(int64(j))}
-				partitionAttrs["partitionable"] = resourceapi.DeviceAttribute{BoolValue: ptr.To(true)}
-
-				devices = append(devices, resourceapi.Device{
-					Name:       fmt.Sprintf("gpu-%d-partition-%d", i, j),
-					Attributes: partitionAttrs,
-					Capacity: map[resourceapi.QualifiedName]resourceapi.DeviceCapacity{
-						"memory": {
-							Value: partitionMemory,
-						},
-					},
-					ConsumesCounters: []resourceapi.DeviceCounterConsumption{
-						{
-							CounterSet: counterSetName,
-							Counters: map[string]resourceapi.Counter{
-								"memory": {
-									Value: partitionMemory,
-								},
-								"compute": {
-									Value: partitionCompute,
-								},
-							},
-						},
-					},
-				})
-			}
-
-			// Full GPU device that consumes all resources from the counter set
-			fullAttrs := maps.Clone(attrs)
-			fullAttrs["partitionable"] = resourceapi.DeviceAttribute{BoolValue: ptr.To(true)}
-			fullAttrs["full"] = resourceapi.DeviceAttribute{BoolValue: ptr.To(true)}
-
-			devices = append(devices, resourceapi.Device{
-				Name:       fmt.Sprintf("gpu-%d-full", i),
-				Attributes: fullAttrs,
-				Capacity: map[resourceapi.QualifiedName]resourceapi.DeviceCapacity{
-					"memory": {
-						Value: memoryPerGPU,
-					},
-				},
-				ConsumesCounters: []resourceapi.DeviceCounterConsumption{
-					{
-						CounterSet: counterSetName,
-						Counters: map[string]resourceapi.Counter{
-							"memory": {
-								Value: memoryPerGPU,
-							},
-							"compute": {
-								Value: computePerGPU,
-							},
-						},
-					},
-				},
-			})
-		} else {
-			devices = append(devices, resourceapi.Device{
-				Name:       fmt.Sprintf("gpu-%d", i),
-				Attributes: attrs,
-				Capacity: map[resourceapi.QualifiedName]resourceapi.DeviceCapacity{
-					"memory": {
-						Value: memoryPerGPU,
-					},
-				},
-			})
-		}
+	// Sift customization: advertise the scenario fleet (built in sift.go) instead
+	// of identical mock GPUs.
+	devices, err := siftDevices()
+	if err != nil {
+		return resourceslice.DriverResources{}, err
 	}
 
 	if p.bindingConditions {
@@ -183,45 +71,13 @@ func (p Profile) EnumerateDevices() (resourceslice.DriverResources, error) {
 		}
 	}
 
-	slices := []resourceslice.Slice{{Devices: devices}}
-	if len(sharedCounters) > 0 {
-		slices = []resourceslice.Slice{
-			{SharedCounters: sharedCounters},
-			{Devices: devices},
-		}
-	}
-
-	resources := resourceslice.DriverResources{
+	return resourceslice.DriverResources{
 		Pools: map[string]resourceslice.Pool{
 			p.nodeName: {
-				Slices: slices,
+				Slices: []resourceslice.Slice{{Devices: devices}},
 			},
 		},
-	}
-
-	return resources, nil
-}
-
-func generateUUIDs(seed string, count int) []string {
-	rand := rand.New(rand.NewSource(hash(seed)))
-
-	uuids := make([]string, count)
-	for i := 0; i < count; i++ {
-		charset := make([]byte, 16)
-		rand.Read(charset)
-		uuid, _ := uuid.FromBytes(charset)
-		uuids[i] = "gpu-" + uuid.String()
-	}
-
-	return uuids
-}
-
-func hash(s string) int64 {
-	h := int64(0)
-	for _, c := range s {
-		h = 31*h + int64(c)
-	}
-	return h
+	}, nil
 }
 
 // SchemeBuilder implements [profiles.ConfigHandler].

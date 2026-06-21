@@ -1,0 +1,68 @@
+# realistic-2026 — a provider-coherent, on-prem heterogeneous accelerator
+# cluster (ADR-0012). One NVIDIA software stack (H100 + B200), one AMD stack
+# (MI300X), and one inference ASIC (Inferentia2).
+#
+# Spec values (memory, precisions, cost) are GROUNDED on real 2026 hardware but
+# approximate, and deliberately simplified where it sharpens a trap (noted
+# inline). They are data, not logic — tune them freely; the loader and scheduler
+# never special-case a chip (CLAUDE.md: "catalog is data, not logic").
+#
+# The `fleet:` list is walked top-to-bottom, and that order IS the iteration
+# order a first-fit legacy scheduler sees. Tempting-but-wrong devices are placed
+# FIRST so the legacy-vs-Sift contrast actually triggers (ADR-0014).
+
+catalog:
+  # AWS Inferentia2 — inference ASIC, NOT trainable. The type-rejection trap.
+  # precisions simplified to [fp16, int8] (no fp8) to keep it out of fp8
+  # inference jobs; real Inferentia2 also does bf16/fp8.
+  inferentia2:
+    vendor: aws
+    category: infer-asic
+    memoryGB: 32
+    precisions: [fp16, int8]
+    interconnect: neuronlink
+    costPerHr: 0.75
+    trainable: false
+
+  # NVIDIA B200 (Blackwell) — newest, most capable, most expensive. The cost
+  # trap: a first-fit scheduler grabs it even when something cheaper fits.
+  b200:
+    vendor: nvidia
+    category: gpu
+    memoryGB: 192
+    precisions: [bf16, fp16, fp8, fp4]
+    interconnect: nvlink
+    costPerHr: 6.0
+    trainable: true
+
+  # NVIDIA H100 (Hopper) — the workhorse training GPU, grouped into NVLink
+  # islands. Provides the topology trap's same-island capacity.
+  h100:
+    vendor: nvidia
+    category: gpu
+    memoryGB: 80
+    precisions: [bf16, fp16, fp8]
+    interconnect: nvlink
+    costPerHr: 2.5
+    trainable: true
+
+  # AMD MI300X — large-memory trainable GPU on Infinity Fabric, cheaper than the
+  # NVIDIA parts. Usually the cheapest *fitting* device for big-memory jobs.
+  mi300x:
+    vendor: amd
+    category: gpu
+    memoryGB: 192
+    precisions: [bf16, fp16, fp8]
+    interconnect: infinity-fabric
+    costPerHr: 1.9
+    trainable: true
+
+fleet:
+  # --- Traps first (ADR-0014): cheapest and most-expensive placed up front ---
+  - { class: inferentia2, count: 4, node: 0 }              # standalone (NoIsland); cheap + first -> first-fit mis-types a training job onto it
+  - { class: b200,        count: 2, node: 1, island: 0 }   # most expensive + early -> first-fit overspends
+
+  # --- Correct-but-later devices ---
+  - { class: h100,        count: 4, node: 2, island: 1 }   # NVLink island of 4 — a same-island gang lands wholly here...
+  - { class: h100,        count: 4, node: 3, island: 2 }   # ...or wholly in this second island; it must not fragment across the two
+  - { class: mi300x,      count: 4, node: 4, island: 3 }   # cheapest fitting trainable GPUs for large-memory, cost-sensitive jobs
