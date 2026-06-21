@@ -35,6 +35,36 @@ nodes:
     nodeRegistration:
       kubeletExtraArgs:
         v: "1"
+# Sift: 5 workers to mirror the realistic-2026 fleet's 5 nodes. Each is labeled
+# sift.dev/fleet-node=<n> after creation (see the cluster bring-up).
+- role: worker
+  kubeadmConfigPatches:
+  - |
+    kind: JoinConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        v: "1"
+- role: worker
+  kubeadmConfigPatches:
+  - |
+    kind: JoinConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        v: "1"
+- role: worker
+  kubeadmConfigPatches:
+  - |
+    kind: JoinConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        v: "1"
+- role: worker
+  kubeadmConfigPatches:
+  - |
+    kind: JoinConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        v: "1"
 - role: worker
   kubeadmConfigPatches:
   - |

@@ -58,8 +58,8 @@ func NewProfile(nodeName string, numGPUs int, partitionsPerGPU int, enableDevice
 
 func (p Profile) EnumerateDevices() (resourceslice.DriverResources, error) {
 	// Sift customization: advertise the scenario fleet (built in sift.go) instead
-	// of identical mock GPUs.
-	devices, err := siftDevices()
+	// of identical mock GPUs — only this node's slice of the fleet.
+	devices, err := siftDevices(p.nodeName)
 	if err != nil {
 		return resourceslice.DriverResources{}, err
 	}
