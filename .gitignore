@@ -9,3 +9,6 @@ driver_image.tar
 
 # Ignore config telemetry files
 .config/
+
+# Claude Code local config & worktrees
+.claude/
