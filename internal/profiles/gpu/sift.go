@@ -15,6 +15,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"os"
 	"strconv"
 
 	resourceapi "k8s.io/api/resource/v1"
@@ -29,10 +30,23 @@ import (
 )
 
 //go:embed realistic-2026.yaml
-var fleetYAML []byte
+var realisticFleetYAML []byte
+
+//go:embed topology-witness.yaml
+var topologyWitnessFleetYAML []byte
 
 // fleetNodeLabel names which fleet node a kube node represents.
 const fleetNodeLabel = "sift.dev/fleet-node"
+
+// scenarioFleetYAML selects the embedded scenario this driver publishes. Default
+// is the realistic-2026 fleet; SIFT_SCENARIO=topology-witness publishes the
+// two-islands-on-one-node fleet used by the same-island gang e2e (ADR-0025).
+func scenarioFleetYAML() []byte {
+	if os.Getenv("SIFT_SCENARIO") == "topology-witness" {
+		return topologyWitnessFleetYAML
+	}
+	return realisticFleetYAML
+}
 
 // siftDevices renders the devices this kube node should advertise: the scenario
 // fleet filtered to the fleet node named by this node's sift.dev/fleet-node label.
@@ -41,12 +55,12 @@ func siftDevices(nodeName string) ([]resourceapi.Device, error) {
 	if err != nil {
 		return nil, err
 	}
-	return siftDevicesForNode(fleetNode)
+	return siftDevicesForNode(fleetNode, scenarioFleetYAML())
 }
 
-// siftDevicesForNode loads the embedded fleet and renders the devices on the given
-// fleet node. Pure (no cluster), so it is unit-testable.
-func siftDevicesForNode(fleetNode int) ([]resourceapi.Device, error) {
+// siftDevicesForNode renders the devices on the given fleet node from a scenario
+// fleet. Pure (no cluster, scenario passed in), so it is unit-testable.
+func siftDevicesForNode(fleetNode int, fleetYAML []byte) ([]resourceapi.Device, error) {
 	fleet, err := config.LoadFleet(bytes.NewReader(fleetYAML))
 	if err != nil {
 		return nil, fmt.Errorf("loading sift fleet: %w", err)

@@ -1,0 +1,28 @@
+# topology-witness — a deliberately minimal fleet that places TWO NVLink islands
+# on a SINGLE node, so DRA `matchAttribute: island` does work that node-locality
+# alone cannot. Used only by the in-cluster topology e2e
+# (SIFT_SCENARIO=topology-witness); realistic-2026 stays the default fleet.
+#
+# Eight H100s on fleet node 0 (one kube worker), split into island 0 (4) and
+# island 1 (4). DRA devices are node-local, so a single count:4 claim already
+# lands on one node — but that node now holds two islands, so without a
+# constraint the scheduler is free to take 2 from each (a 2+2 fragmentation).
+# A same-island gang therefore needs `matchAttribute: island` to stay whole.
+# The e2e pins fillers into island 0 so the gang can only fit in island 1, making
+# the constraint's effect observable (an unconstrained claim fragments instead).
+
+catalog:
+  # NVIDIA H100 — same spec as realistic-2026; the catalog is data, not logic.
+  h100:
+    vendor: nvidia
+    category: gpu
+    memoryGB: 80
+    precisions: [bf16, fp16, fp8]
+    interconnect: nvlink
+    costPerHr: 2.5
+    trainable: true
+
+fleet:
+  # Both placements on fleet node 0 -> the same kube worker, two NVLink islands.
+  - { class: h100, count: 4, node: 0, island: 0 }
+  - { class: h100, count: 4, node: 0, island: 1 }
